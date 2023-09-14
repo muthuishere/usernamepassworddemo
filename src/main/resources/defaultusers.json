@@ -1,0 +1,22 @@
+[
+  {
+    "email": "user1@forddealer.com",
+    "password": "password",
+    "roles": ["USER"]
+  },
+  {
+    "email": "user2@forddealer.com",
+    "password": "password",
+    "roles": ["USER"]
+  },
+  {
+    "email": "admin1@forddealer.com",
+    "password": "password",
+    "roles": ["ADMIN"]
+  },
+  {
+    "email": "admin2@forddealer.com",
+    "password": "password",
+    "roles": ["ADMIN"]
+  }
+]

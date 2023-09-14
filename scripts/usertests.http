@@ -1,0 +1,40 @@
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+    "email": "user1@forddealer.com",
+    "password": "password"
+}
+
+> {%
+client.global.set("token", response.body.token);
+client.global.set("email", response.body.email);
+
+ %}
+
+### Get Current User
+
+GET http://localhost:8080/api/users/get
+Authorization: Bearer {{token}}
+
+
+> {%
+client.test("Request executed successfully", function() {
+  client.assert(response.status === 200, "Response status is not 200");
+
+});
+%}
+
+
+### Should not able to access get all users
+
+GET http://localhost:8080/api/admin/all
+Authorization: Bearer {{token}}
+
+
+> {%
+client.test("Request should throw forbidden successfully", function() {
+  client.assert(response.status === 403, "Response status is not forbidden");
+
+});
+%}
