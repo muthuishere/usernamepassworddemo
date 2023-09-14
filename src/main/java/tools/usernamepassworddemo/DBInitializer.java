@@ -20,14 +20,18 @@ import tools.usernamepassworddemo.users.User;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
+
+// An alternative to flyway or liquibase to initialize the database
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class DBInitializer {
 
 
-    public static final String DEFAULTUSERS_JSON = "/defaultusers.json";
+    public static final String DEFAULT_TABLE_TO_BE_CHECKED = "users";
+    public static final String USER_JSON_FILE_PATH = "/defaultusers.json" ;
     private final R2dbcEntityTemplate entityTemplate;
     private final BCryptPasswordEncoder bCryptPasswordEncoder;
 
@@ -36,93 +40,60 @@ public class DBInitializer {
 
 
     @PostConstruct
-    public void initUsers() throws Exception {
+    public void initDatabase() throws Exception {
 
+        // The below query is SQL compliant to be checked for a table to be exists
 
-        databaseClient.sql("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'users'")
+        databaseClient.sql("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '" + DEFAULT_TABLE_TO_BE_CHECKED + "'")
                 .fetch()
                 .one()
-                .filter(result -> {
-                    Boolean returnVal =false;
-                    Object o = result.get("COUNT(*)");
-                    if(o != null){
-                        returnVal =  (Long)o == 0;
-                    }
-                    return returnVal;
-                })
-                .flatMap(result -> {
-
-                        Resource resource = new ClassPathResource("schema.sql");
-                        String sql;
-                        try {
-                            sql = StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
-                            return databaseClient.sql(sql).fetch().rowsUpdated();
-                        } catch (Exception e) {
-                            return Mono.error(e);
-                        }
+                .filter(result -> isCountZero(result))
+                .flatMap(result -> insertSchema())
+                .flatMap(result -> insertUsersData())
+                .log()
+                .subscribe();
 
 
-                }).flatMap(result -> {
+    }
 
+    private static Boolean isCountZero(Map<String, Object> rows) {
+        Boolean result =false;
+        Object countObject = rows.get("COUNT(*)");
+        if(countObject != null){
+            result =  (Long)countObject == 0;
+        }
+        return result;
+    }
 
+    private Mono<List<User>> insertUsersData() {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            TypeReference<List<User>> typeReference = new TypeReference<>() {};
+            InputStream inputStream = TypeReference.class.getResourceAsStream(USER_JSON_FILE_PATH);
+            List<User> users = mapper.readValue(inputStream, typeReference);
+            log.info(DEFAULT_TABLE_TO_BE_CHECKED + ": {}", users);
+            return Flux.fromIterable(users)
+                    .map(user -> {
+                        user.setPassword(bCryptPasswordEncoder.encode(user.getPassword()));
+                        return user;
+                    })
+                    .flatMap(user -> entityTemplate.insert(User.class).using(user)).collectList();
 
-                    try {
-                        ObjectMapper mapper = new ObjectMapper();
-                        TypeReference<List<User>> typeReference = new TypeReference<>() {};
-                        InputStream inputStream = TypeReference.class.getResourceAsStream(DEFAULTUSERS_JSON);
-                        List<User> users = mapper.readValue(inputStream, typeReference);
-                        log.info("users: {}", users);
-                        return Flux.fromIterable(users)
-                                .map(user -> {
+        } catch (Exception e) {
+            System.out.println("Unable to read " + DEFAULT_TABLE_TO_BE_CHECKED + ": " + e.getMessage());
+            return Mono.empty();
 
-                                    log.info("user: {}", user);
-                                    log.info("user: {}", user.getPassword());
-                                    user.setPassword(bCryptPasswordEncoder.encode(user.getPassword()));
-                                    return user;
-                                })
-                                .flatMap(user -> entityTemplate.insert(User.class).using(user)).collectList();
+        }
+    }
 
-                    } catch (Exception e) {
-                        System.out.println("Unable to read users: " + e.getMessage());
-                        return Mono.empty();
-
-                    }
-
-
-
-
-                }).log().subscribe();
-
-
-//
-//
-//        entityTemplate.getDatabaseClient().sql("SELECT COUNT(*) FROM users")
-//                .fetch()
-//                .one()
-//                .map(count -> (Long) count.get("COUNT(*)"))
-//                .flatMapMany(count -> {
-//                    if (count == 0) {
-//                        // Read the JSON file and insert users
-//                        ObjectMapper mapper = new ObjectMapper();
-//                        TypeReference<List<User>> typeReference = new TypeReference<>() {};
-//                        InputStream inputStream = TypeReference.class.getResourceAsStream(DEFAULTUSERS_JSON);
-//                        try {
-//                            List<User> users = mapper.readValue(inputStream, typeReference);
-//                            return Flux.fromIterable(users)
-//                                    .map(user -> {
-//                                        user.setPassword(bCryptPasswordEncoder.encode(user.getPassword()));
-//                                        return user;
-//                                    })
-//                                    .flatMap(user -> entityTemplate.insert(User.class).using(user));
-//
-//                        } catch (Exception e) {
-//                            System.out.println("Unable to read users: " + e.getMessage());
-//                            return Mono.empty();
-//                        }
-//                    }
-//                    return Mono.empty();
-//                })
-//                .log()
-//                .subscribe();
+    private Mono<Long> insertSchema() {
+        Resource resource = new ClassPathResource("schema.sql");
+        String sql;
+        try {
+            sql = StreamUtils.copyToString(resource.getInputStream(), StandardCharsets.UTF_8);
+            return databaseClient.sql(sql).fetch().rowsUpdated();
+        } catch (Exception e) {
+            return Mono.error(e);
+        }
     }
 }
